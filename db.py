@@ -17,6 +17,8 @@ def init_db(conn: sqlite3.Connection):
             source_name TEXT NOT NULL,
             title       TEXT NOT NULL,
             author      TEXT,
+            opdb_id     TEXT,
+            channel     TEXT,
             first_seen  DATE NOT NULL,
             last_seen   DATE NOT NULL,
             status      TEXT NOT NULL DEFAULT 'active',
@@ -28,9 +30,9 @@ def init_db(conn: sqlite3.Connection):
 def write_records(conn: sqlite3.Connection, records: list[dict]):
     conn.executemany("""
         INSERT OR IGNORE INTO articles 
-            (url, source, source_name, title, author, first_seen, last_seen, status, enrichment)
+            (url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen, status, enrichment)
         VALUES 
-            (:url, :source, :source_name, :title, :author, :first_seen, :last_seen, :status, NULL)
+            (:url, :source, :source_name, :title, :author, :opdb_id, :channel, :first_seen, :last_seen, :status, NULL)
     """, records)
     conn.commit()
 
@@ -42,9 +44,12 @@ def read_active_records(conn: sqlite3.Connection) -> list[dict]:
 
 def read_removed_records(conn: sqlite3.Connection) -> list[dict]:
     cursor = conn.execute("""
-        SELECT url, source, source_name, title, first_seen, last_seen FROM articles WHERE status = 'removed'
+        SELECT url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen 
+        FROM articles WHERE status = 'removed'
     """)
-    return [{"url": row[0], "source": row[1], "source_name": row[2], "title": row[3], "first_seen": row[4], "last_seen": row[5]} for row in cursor.fetchall()]
+    return [{"url": row[0], "source": row[1], "source_name": row[2], "title": row[3],
+             "author": row[4], "opdb_id": row[5], "channel": row[6],
+             "first_seen": row[7], "last_seen": row[8]} for row in cursor.fetchall()]
 
 def diff_records(old_active, old_removed, new_records):
     old_active_map = {r["url"]: r["title"] for r in old_active}

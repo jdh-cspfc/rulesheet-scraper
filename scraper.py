@@ -117,6 +117,71 @@ def scrape_source(source: dict) -> list[dict]:
                 "source_name": source["name"],
                 "title": name,
                 "author": None,
+                "opdb_id": None,
+                "channel": None,
+                "first_seen": today,
+                "last_seen": today,
+                "status": "active"
+            })
+        return deduplicate_records(results)
+    
+    json_api = source.get("json_api")
+
+    if json_api:
+        data = response.json()
+        collection = data.get(json_api["filter_key"], {})
+        filter_where = json_api["filter_where"]
+        matched = None
+        for item in collection.values():
+            if all(item.get(k) == v for k, v in filter_where.items()):
+                matched = item
+                break
+        if matched is None:
+            print(f"  WARNING: Could not find matching item in API response")
+            return []
+
+        # Build reverse lookup: youtube_id -> video entry
+        videos_by_youtube_id = {}
+        for video in data.get("videos", {}).values():
+            yt_id = video.get("youtube_id")
+            if yt_id:
+                videos_by_youtube_id[yt_id] = video
+
+        machines = data.get("machines", {})
+        players = data.get("players", {})
+
+        results = []
+        for yt_id in matched.get(json_api["items_key"], []):
+            video = videos_by_youtube_id.get(yt_id)
+            if not video:
+                continue
+
+            # Get machine name and opdb_id
+            machine_id = str(video.get("machine_id", ""))
+            machine = machines.get(machine_id, {})
+            title = machine.get("name") or f"Tutorial Video {yt_id}"
+            opdb_id = machine.get("opdb_id")
+
+            # Get channel
+            channel = video.get("channel")
+
+            # Get author from first player_id
+            author = None
+            player_ids = video.get("player_ids", [])
+            if player_ids:
+                player_id = str(player_ids[0])
+                player = players.get(player_id, {})
+                author = player.get("name")
+
+            full_url = json_api["url_template"].replace("{id}", yt_id)
+            results.append({
+                "url": full_url,
+                "source": source["url"],
+                "source_name": source["name"],
+                "title": title,
+                "author": author,
+                "opdb_id": opdb_id,
+                "channel": channel,
                 "first_seen": today,
                 "last_seen": today,
                 "status": "active"
@@ -163,6 +228,8 @@ def scrape_source(source: dict) -> list[dict]:
             "source_name": source["name"],
             "title": title,
             "author": extract_author(a, author_pattern),
+            "opdb_id": None,
+            "channel": None,
             "first_seen": today,
             "last_seen": today,
             "status": "active"
@@ -216,6 +283,8 @@ def run():
                     "source": source["url"],
                     "source_name": source["name"],
                     "title": old_record["title"],
+                    "opdb_id": old_record.get("opdb_id"),
+                    "channel": old_record.get("channel"),
                     "first_seen": old_record["first_seen"],
                     "last_seen": today,
                     "status": "removed"
