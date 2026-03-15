@@ -1,0 +1,14 @@
+[
+    {
+        "name": "BobsGuide_RuleSheets",
+        "url": "https://rules.silverballmania.com/list",
+        "base_url": "https://rules.silverballmania.com",
+        "json_in_script": {
+            "search_text": "opendbId",
+            "machines_key": "machines",
+            "name_key": "name",
+            "id_key": "opendbId",
+            "url_template": "/rules/{id}"
+        }
+    }
+]
