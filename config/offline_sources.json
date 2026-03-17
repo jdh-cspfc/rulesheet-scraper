@@ -1,48 +1,11 @@
-[
     {
-        "name": "TiltForums_RuleSheets",
-        "url": "https://tiltforums.com/t/rulesheet-master-list/7230.json",
-        "json_content_path": ["post_stream", "posts", 0, "cooked"],
-        "selector": "td:first-child a"
-    },
-    {
-        "name": "PAPA_RuleSheets",
-        "url": "https://replayfoundation.org/papa/learning-center/player-guide/rule-sheets/",
-        "selector": "span.RuleSheetLink a",
-        "base_url": "",
-        "author_pattern": {"type": "parens_in_parent"}
-    },
-    {
-        "name": "PinballOrg_RuleSheets",
-        "url": "https://pinball.org/rules/",
-        "selector": "div.rulesheets li a",
-        "base_url": "https://pinball.org/rules/",
-        "author_pattern": {"type": "parens_in_parent"}
-    },
-    {
-        "name": "Zaccaria_RuleSheets",
-        "url": "https://www.zaccaria-pinball.com/rulesheets/contents.html",
-        "selector": "a[target='showframe']",
-        "base_url": "https://www.zaccaria-pinball.com/rulesheets",
-        "stop_before": "To Be written",
-        "skip_hrefs": ["intro.html"]
-    },
-    {
-        "name": "PinballPrimer_RuleSheets",
-        "url": "https://pinballprimer.github.io/gamelist.html",
-        "selector": "body > a",
-        "skip_hrefs": ["index.html"]
-    },
-    {
-        "name": "BobsGuide_RuleSheets",
-        "url": "https://rules.silverballmania.com/list",
-        "base_url": "https://rules.silverballmania.com",
-        "json_in_script": {
-            "search_text": "opendbId",
-            "machines_key": "machines",
-            "name_key": "name",
-            "id_key": "opendbId",
-            "url_template": "/rules/{id}"
-        }
+        "name": "Kineticist_Tutorials",
+        "url": "https://www.kineticist.com/blog-category/pinball-tutorial",
+        "selector": "div.blog52_list-wrapper a[href^='/post/']",
+        "fetch_title": {
+            "title_selector": "a[href*='/pinball-machines/']",
+            "author_selector": "a[href*='/author/']",
+            "delay": 1
+        },
+        "content_type": "tutorial"
     }
-]

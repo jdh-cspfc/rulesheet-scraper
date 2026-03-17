@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 import db
 import os
+import time
 from urllib.parse import urljoin
 import re
 
@@ -46,6 +47,35 @@ def extract_author(a_tag, author_pattern: dict) -> str | None:
     
     return None
 
+def _first_text_node(el) -> str | None:
+    """Return the first direct text node of an element, ignoring child tags like labels."""
+    for child in el.children:
+        if isinstance(child, str) and child.strip():
+            return child.strip()
+    return None
+
+def fetch_title_from_page(url: str, title_selector: str, author_selector: str | None, headers: dict) -> tuple[str | None, str | None]:
+    """Fetch an article page and extract title and optionally author using CSS selectors.
+    Returns (title, author) — either may be None if not found."""
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        title_el = soup.select_one(title_selector)
+        title = _first_text_node(title_el) if title_el else None
+
+        author = None
+        if author_selector:
+            author_els = soup.select(author_selector)
+            names = [n for el in author_els if (n := _first_text_node(el))]
+            author = ", ".join(names) if names else None
+
+        return title, author
+    except Exception as e:
+        print(f"  WARNING: Failed to fetch title from {url}: {e}")
+        return None, None
+
 def load_sources(path:str = "config/sources.json") -> list[dict]:
     with open(path, "r") as f:
         return json.load(f)
@@ -59,10 +89,29 @@ def deduplicate_records(records: list[dict]) -> list[dict]:
             deduped.append(r)
     return deduped
 
-def scrape_source(source: dict) -> list[dict]:
+def scrape_source(source: dict, use_cache: bool = False) -> list[dict]:
     headers = {**HEADERS, "User-Agent": source.get("user_agent", HEADERS["User-Agent"])}
-    response = requests.get(source["url"], headers=headers)
-    response.raise_for_status()
+    
+    if use_cache:
+        import glob
+        matches = glob.glob(f"cache/{source['name']}.*")
+        if matches:
+            with open(matches[0], encoding="utf-8") as f:
+                raw = f.read()
+            # fake a response object
+            class CachedResponse:
+                def __init__(self, text):
+                    self.text = text
+                def raise_for_status(self): pass
+                def json(self): return json.loads(self.text)
+            response = CachedResponse(raw)
+        else:
+            print(f"  No cache found for {source['name']}, fetching live...")
+            response = requests.get(source["url"], headers=headers)
+            response.raise_for_status()
+    else:
+        response = requests.get(source["url"], headers=headers)
+        response.raise_for_status()
 
     json_path = source.get("json_content_path")
     if json_path:
@@ -121,7 +170,8 @@ def scrape_source(source: dict) -> list[dict]:
                 "channel": None,
                 "first_seen": today,
                 "last_seen": today,
-                "status": "active"
+                "status": "active",
+                "content_type": source.get("content_type")
             })
         return deduplicate_records(results)
     
@@ -184,7 +234,8 @@ def scrape_source(source: dict) -> list[dict]:
                 "channel": channel,
                 "first_seen": today,
                 "last_seen": today,
-                "status": "active"
+                "status": "active",
+                "content_type": source.get("content_type")
             })
         return deduplicate_records(results)
 
@@ -204,9 +255,11 @@ def scrape_source(source: dict) -> list[dict]:
 
     href_prefix = source.get("href_prefix")
     author_pattern = source.get("author_pattern")
+    fetch_title = source.get("fetch_title")
 
     results = []
-    for a in links:
+    total = len(links)
+    for i, a in enumerate(links):
         title = a.get_text(strip=True)
         href = a.get("href", "")
         
@@ -222,27 +275,44 @@ def scrape_source(source: dict) -> list[dict]:
                 continue
             full_url = urljoin(source["url"], href)
 
+        author = extract_author(a, author_pattern)
+
+        if fetch_title:
+            time.sleep(fetch_title.get("delay", 1))
+            fetched_title, fetched_author = fetch_title_from_page(
+                full_url,
+                fetch_title["title_selector"],
+                fetch_title.get("author_selector"),
+                headers
+            )
+            if fetched_title:
+                title = fetched_title
+            if fetched_author:
+                author = fetched_author
+            print(f"  [{i + 1}/{total}] {title or href}")
+
         results.append({
             "url": full_url,
             "source": source["url"],
             "source_name": source["name"],
             "title": title,
-            "author": extract_author(a, author_pattern),
+            "author": author,
             "opdb_id": None,
             "channel": None,
             "first_seen": today,
             "last_seen": today,
-            "status": "active"
+            "status": "active",
+            "content_type": source.get("content_type")
         })
 
     return deduplicate_records(results)
 
-def run():
+def run(use_cache: bool = False):
     sources = load_sources()
 
     for source in sources:
         print(f"Scraping {source['name']}...")
-        new_records = scrape_source(source)
+        new_records = scrape_source(source, use_cache=use_cache)
         print(f"Found {len(new_records)} links")
 
         db_path = db.get_db_path(source["name"])
@@ -287,7 +357,8 @@ def run():
                     "channel": old_record.get("channel"),
                     "first_seen": old_record["first_seen"],
                     "last_seen": today,
-                    "status": "removed"
+                    "status": "removed",
+                    "content_type": source.get("content_type")
                 })
         
         # Also carry over previously removed records, skipping any that have reappeared
@@ -314,4 +385,6 @@ def run():
         print(f"Written to {db_path}")
 
 if __name__ == "__main__":
-    run()
+    import sys
+    use_cache = "--cache" in sys.argv
+    run(use_cache=use_cache)

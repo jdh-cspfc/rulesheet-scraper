@@ -22,6 +22,7 @@ def init_db(conn: sqlite3.Connection):
             first_seen  DATE NOT NULL,
             last_seen   DATE NOT NULL,
             status      TEXT NOT NULL DEFAULT 'active',
+            content_type TEXT,
             enrichment  TEXT
         )
     """)
@@ -30,9 +31,9 @@ def init_db(conn: sqlite3.Connection):
 def write_records(conn: sqlite3.Connection, records: list[dict]):
     conn.executemany("""
         INSERT OR IGNORE INTO articles 
-            (url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen, status, enrichment)
+            (url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen, status, content_type, enrichment)
         VALUES 
-            (:url, :source, :source_name, :title, :author, :opdb_id, :channel, :first_seen, :last_seen, :status, NULL)
+            (:url, :source, :source_name, :title, :author, :opdb_id, :channel, :first_seen, :last_seen, :status, :content_type, NULL)
     """, records)
     conn.commit()
 

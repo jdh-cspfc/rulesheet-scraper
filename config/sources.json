@@ -2,22 +2,34 @@
     {
         "name": "TiltForums_RuleSheets",
         "url": "https://tiltforums.com/t/rulesheet-master-list/7230.json",
-        "json_content_path": ["post_stream", "posts", 0, "cooked"],
-        "selector": "td:first-child a"
+        "json_content_path": [
+            "post_stream",
+            "posts",
+            0,
+            "cooked"
+        ],
+        "selector": "td:first-child a",
+        "content_type": "rulesheet"
     },
     {
         "name": "PAPA_RuleSheets",
         "url": "https://replayfoundation.org/papa/learning-center/player-guide/rule-sheets/",
         "selector": "span.RuleSheetLink a",
         "base_url": "",
-        "author_pattern": {"type": "parens_in_parent"}
+        "author_pattern": {
+            "type": "parens_in_parent"
+        },
+        "content_type": "rulesheet"
     },
     {
         "name": "PinballOrg_RuleSheets",
         "url": "https://pinball.org/rules/",
         "selector": "div.rulesheets li a",
         "base_url": "https://pinball.org/rules/",
-        "author_pattern": {"type": "parens_in_parent"}
+        "author_pattern": {
+            "type": "parens_in_parent"
+        },
+        "content_type": "rulesheet"
     },
     {
         "name": "Zaccaria_RuleSheets",
@@ -25,13 +37,19 @@
         "selector": "a[target='showframe']",
         "base_url": "https://www.zaccaria-pinball.com/rulesheets",
         "stop_before": "To Be written",
-        "skip_hrefs": ["intro.html"]
+        "skip_hrefs": [
+            "intro.html"
+        ],
+        "content_type": "rulesheet"
     },
     {
         "name": "PinballPrimer_RuleSheets",
         "url": "https://pinballprimer.github.io/gamelist.html",
         "selector": "body > a",
-        "skip_hrefs": ["index.html"]
+        "skip_hrefs": [
+            "index.html"
+        ],
+        "content_type": "rulesheet"
     },
     {
         "name": "BobsGuide_RuleSheets",
@@ -43,16 +61,20 @@
             "name_key": "name",
             "id_key": "opendbId",
             "url_template": "/rules/{id}"
-        }
+        },
+        "content_type": "rulesheet"
     },
     {
         "name": "PinballVideos_Tutorials",
         "url": "https://api.pinballvideos.com/cached/app",
         "json_api": {
             "filter_key": "events",
-            "filter_where": {"slug": "tutorial"},
+            "filter_where": {
+                "slug": "tutorial"
+            },
             "items_key": "youtube_ids",
             "url_template": "https://www.youtube.com/watch?v={id}"
-        }
+        },
+        "content_type": "tutorial"
     }
 ]
