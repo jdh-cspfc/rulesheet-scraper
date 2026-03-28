@@ -27,6 +27,7 @@ def init_db(conn: sqlite3.Connection):
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             opdb_id      TEXT,
             group_id     TEXT,
+            alias_id     TEXT,
             url          TEXT NOT NULL,
             source_name  TEXT NOT NULL,
             content_type TEXT NOT NULL,
@@ -46,8 +47,8 @@ def init_db(conn: sqlite3.Connection):
     """)
 
     conn.execute("""
-    CREATE INDEX IF NOT EXISTS idx_links_source_url
-    ON links (source_name, url)
+        CREATE INDEX IF NOT EXISTS idx_links_source_url
+        ON links (source_name, url)
     """)
 
     conn.execute("""
@@ -65,6 +66,11 @@ def init_db(conn: sqlite3.Connection):
         ON links (group_id)
     """)
 
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_alias_id
+        ON links (alias_id)
+    """)
+
     conn.commit()
 
 
@@ -74,6 +80,7 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
             id,
             opdb_id,
             group_id,
+            alias_id,
             url,
             source_name,
             content_type,
@@ -92,15 +99,16 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
             "id": row[0],
             "opdb_id": row[1],
             "group_id": row[2],
-            "url": row[3],
-            "source_name": row[4],
-            "content_type": row[5],
-            "title": row[6],
-            "author": row[7],
-            "channel": row[8],
-            "first_seen": row[9],
-            "last_seen": row[10],
-            "status": row[11],
+            "alias_id": row[3],
+            "url": row[4],
+            "source_name": row[5],
+            "content_type": row[6],
+            "title": row[7],
+            "author": row[8],
+            "channel": row[9],
+            "first_seen": row[10],
+            "last_seen": row[11],
+            "status": row[12],
         }
         for row in cursor.fetchall()
     ]
@@ -121,6 +129,7 @@ def insert_link(conn: sqlite3.Connection, record: dict):
         INSERT INTO links (
             opdb_id,
             group_id,
+            alias_id,
             url,
             source_name,
             content_type,
@@ -130,10 +139,11 @@ def insert_link(conn: sqlite3.Connection, record: dict):
             first_seen,
             last_seen,
             status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         record.get("opdb_id"),
         record.get("group_id"),
+        record.get("alias_id"),
         record["url"],
         record["source_name"],
         record["content_type"],
@@ -149,12 +159,14 @@ def insert_link(conn: sqlite3.Connection, record: dict):
 def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict, today: str):
     opdb_id = new.get("opdb_id") if new.get("opdb_id") is not None else existing.get("opdb_id")
     group_id = new.get("group_id") if new.get("group_id") is not None else existing.get("group_id")
+    alias_id = new.get("alias_id") if new.get("alias_id") is not None else existing.get("alias_id")
 
     conn.execute("""
         UPDATE links
         SET
             opdb_id = ?,
             group_id = ?,
+            alias_id = ?,
             content_type = ?,
             title = ?,
             author = ?,
@@ -165,6 +177,7 @@ def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict,
     """, (
         opdb_id,
         group_id,
+        alias_id,
         new["content_type"],
         new["title"],
         new.get("author"),
@@ -224,6 +237,10 @@ def sync_source_records(
             or (
                 new_record.get("group_id") is not None
                 and existing.get("group_id") != new_record.get("group_id")
+            )
+            or (
+                new_record.get("alias_id") is not None
+                and existing.get("alias_id") != new_record.get("alias_id")
             )
         ):
             changed_urls.append(url)

@@ -40,7 +40,21 @@ def deduplicate_records(records: list[dict]) -> list[dict]:
         seen_urls.add(url)
         deduplicated.append(record)
 
-    return deduplicated
+    return deduplicate_records_preserve_order(deduplicated)
+
+
+def deduplicate_records_preserve_order(records: list[dict]) -> list[dict]:
+    seen_urls = set()
+    output = []
+
+    for record in records:
+        url = record["url"]
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        output.append(record)
+
+    return output
 
 
 def add_warning(warnings: list[str], message: str):
@@ -90,6 +104,36 @@ def first_text_node(element) -> str | None:
     return None
 
 
+def classify_opdb_like_id(raw_id: str | None) -> tuple[str | None, str | None, str | None]:
+    """
+    Returns (group_id, opdb_id, alias_id) based on OPDB-style ID structure.
+
+    group_id example: G5W6N
+    opdb_id example: G5W6N-MLe6V
+    alias_id example: G5W6N-MLe6V-A9Y63
+    """
+    if not raw_id:
+        return None, None, None
+
+    raw_id = raw_id.strip()
+    parts = raw_id.split("-")
+
+    if len(parts) == 1:
+        return raw_id, None, None
+
+    if len(parts) == 2:
+        group_id = parts[0]
+        return group_id, raw_id, None
+
+    if len(parts) == 3:
+        group_id = parts[0]
+        opdb_id = f"{parts[0]}-{parts[1]}"
+        alias_id = raw_id
+        return group_id, opdb_id, alias_id
+
+    return None, None, None
+
+
 def build_record(
     source: dict,
     today: str,
@@ -98,6 +142,7 @@ def build_record(
     author: str | None = None,
     opdb_id: str | None = None,
     group_id: str | None = None,
+    alias_id: str | None = None,
     channel: str | None = None,
 ) -> dict:
     return {
@@ -107,6 +152,7 @@ def build_record(
         "author": author,
         "opdb_id": opdb_id,
         "group_id": group_id,
+        "alias_id": alias_id,
         "channel": channel,
         "first_seen": today,
         "last_seen": today,
@@ -261,12 +307,14 @@ def scrape_json_in_script_source(
 
     for machine in machines_data:
         name = machine.get(config["name_key"], "").strip()
-        machine_id = machine.get(config["id_key"], "")
+        raw_id = machine.get(config["id_key"], "")
 
-        if not name or not machine_id:
+        if not name or not raw_id:
             continue
 
-        url_path = config["url_template"].replace("{id}", machine_id)
+        group_id, opdb_id, alias_id = classify_opdb_like_id(raw_id)
+
+        url_path = config["url_template"].replace("{id}", raw_id)
         full_url = source["base_url"] + url_path
 
         results.append(build_record(
@@ -275,11 +323,13 @@ def scrape_json_in_script_source(
             url=full_url,
             title=name,
             author=None,
-            opdb_id=machine_id,
+            opdb_id=opdb_id,
+            group_id=group_id,
+            alias_id=alias_id,
             channel=None,
         ))
 
-    return deduplicate_records(results)
+    return deduplicate_records_preserve_order(results)
 
 
 def scrape_json_api_source(
@@ -328,7 +378,10 @@ def scrape_json_api_source(
         machine_id = str(video.get("machine_id", ""))
         machine = machines.get(machine_id, {})
         title = machine.get("name") or f"Tutorial Video {youtube_id}"
-        opdb_id = machine.get("opdb_id")
+
+        raw_id = machine.get("opdb_id")
+        group_id, opdb_id, alias_id = classify_opdb_like_id(raw_id)
+
         channel = video.get("channel")
 
         author = None
@@ -347,10 +400,12 @@ def scrape_json_api_source(
             title=title,
             author=author,
             opdb_id=opdb_id,
+            group_id=group_id,
+            alias_id=alias_id,
             channel=channel,
         ))
 
-    return deduplicate_records(results)
+    return deduplicate_records_preserve_order(results)
 
 
 def get_source_response(source: dict, headers: dict, use_cache: bool, warnings: list[str]):
@@ -466,7 +521,7 @@ def scrape_html_source(
             author=author,
         ))
 
-    return deduplicate_records(results)
+    return deduplicate_records_preserve_order(results)
 
 
 def scrape_source(source: dict, use_cache: bool = False) -> tuple[list[dict], list[str]]:
@@ -547,6 +602,7 @@ def run(use_cache: bool = False):
                 "removed_urls": [],
                 "changed_urls": [],
                 "reappeared_urls": [],
+                "has_changes": False,
             }
 
             run_log["sources"].append(
