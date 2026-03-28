@@ -1,130 +1,246 @@
 import os
-import shutil
 import sqlite3
-from datetime import date
 
 
 DATA_DIR = "data"
+MAIN_DB_NAME = "main.db"
 
 
-def get_db_path(source_name: str) -> str:
+def get_main_db_path() -> str:
     os.makedirs(DATA_DIR, exist_ok=True)
-    return os.path.join(DATA_DIR, f"{source_name}.db")
+    return os.path.join(DATA_DIR, MAIN_DB_NAME)
 
 
 def init_db(conn: sqlite3.Connection):
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS articles (
-            url          TEXT PRIMARY KEY,
-            source       TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS machines (
+            opdb_id      TEXT PRIMARY KEY,
+            name         TEXT,
+            manufacturer TEXT,
+            year         INTEGER,
+            group_id     TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS links (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            opdb_id      TEXT,
+            group_id     TEXT,
+            url          TEXT NOT NULL,
             source_name  TEXT NOT NULL,
+            content_type TEXT NOT NULL,
             title        TEXT NOT NULL,
             author       TEXT,
-            opdb_id      TEXT,
             channel      TEXT,
             first_seen   DATE NOT NULL,
             last_seen    DATE NOT NULL,
-            status       TEXT NOT NULL DEFAULT 'active',
-            content_type TEXT,
-            enrichment   TEXT
+            status       TEXT NOT NULL CHECK (status IN ('active', 'removed')),
+            UNIQUE (source_name, url)
         )
     """)
-    conn.commit()
 
-
-def write_records(conn: sqlite3.Connection, records: list[dict]):
-    conn.executemany("""
-        INSERT OR IGNORE INTO articles
-            (url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen, status, content_type, enrichment)
-        VALUES
-            (:url, :source, :source_name, :title, :author, :opdb_id, :channel, :first_seen, :last_seen, :status, :content_type, NULL)
-    """, records)
-    conn.commit()
-
-
-def read_active_records(conn: sqlite3.Connection) -> list[dict]:
-    cursor = conn.execute("""
-        SELECT url, title, author, opdb_id, channel, first_seen
-        FROM articles
-        WHERE status = 'active'
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_source_name
+        ON links (source_name)
     """)
+
+    conn.execute("""
+    CREATE INDEX IF NOT EXISTS idx_links_source_url
+    ON links (source_name, url)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_status
+        ON links (status)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_opdb_id
+        ON links (opdb_id)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_group_id
+        ON links (group_id)
+    """)
+
+    conn.commit()
+
+
+def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[dict]:
+    cursor = conn.execute("""
+        SELECT
+            id,
+            opdb_id,
+            group_id,
+            url,
+            source_name,
+            content_type,
+            title,
+            author,
+            channel,
+            first_seen,
+            last_seen,
+            status
+        FROM links
+        WHERE source_name = ?
+    """, (source_name,))
 
     return [
         {
-            "url": row[0],
-            "title": row[1],
-            "author": row[2],
-            "opdb_id": row[3],
-            "channel": row[4],
-            "first_seen": row[5],
+            "id": row[0],
+            "opdb_id": row[1],
+            "group_id": row[2],
+            "url": row[3],
+            "source_name": row[4],
+            "content_type": row[5],
+            "title": row[6],
+            "author": row[7],
+            "channel": row[8],
+            "first_seen": row[9],
+            "last_seen": row[10],
+            "status": row[11],
         }
         for row in cursor.fetchall()
     ]
 
 
-def read_removed_records(conn: sqlite3.Connection) -> list[dict]:
+def count_active_links_for_source(conn: sqlite3.Connection, source_name: str) -> int:
     cursor = conn.execute("""
-        SELECT url, source, source_name, title, author, opdb_id, channel, first_seen, last_seen
-        FROM articles
-        WHERE status = 'removed'
-    """)
+        SELECT COUNT(*)
+        FROM links
+        WHERE source_name = ? AND status = 'active'
+    """, (source_name,))
 
-    return [
-        {
-            "url": row[0],
-            "source": row[1],
-            "source_name": row[2],
-            "title": row[3],
-            "author": row[4],
-            "opdb_id": row[5],
-            "channel": row[6],
-            "first_seen": row[7],
-            "last_seen": row[8],
-        }
-        for row in cursor.fetchall()
-    ]
+    return cursor.fetchone()[0]
 
 
-def get_diff_details(old_active: list[dict], old_removed: list[dict], new_records: list[dict]) -> dict:
-    old_active_map = {record["url"]: record["title"] for record in old_active}
-    old_active_urls = set(old_active_map.keys())
+def insert_link(conn: sqlite3.Connection, record: dict):
+    conn.execute("""
+        INSERT INTO links (
+            opdb_id,
+            group_id,
+            url,
+            source_name,
+            content_type,
+            title,
+            author,
+            channel,
+            first_seen,
+            last_seen,
+            status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        record.get("opdb_id"),
+        record.get("group_id"),
+        record["url"],
+        record["source_name"],
+        record["content_type"],
+        record["title"],
+        record.get("author"),
+        record.get("channel"),
+        record["first_seen"],
+        record["last_seen"],
+        record["status"],
+    ))
 
-    old_removed_urls = {record["url"] for record in old_removed}
 
-    new_map = {record["url"]: record["title"] for record in new_records}
-    new_urls = set(new_map.keys())
+def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict, today: str):
+    opdb_id = new.get("opdb_id") if new.get("opdb_id") is not None else existing.get("opdb_id")
+    group_id = new.get("group_id") if new.get("group_id") is not None else existing.get("group_id")
 
-    added_urls = sorted(new_urls - old_active_urls)
-    removed_urls = sorted(old_active_urls - new_urls)
+    conn.execute("""
+        UPDATE links
+        SET
+            opdb_id = ?,
+            group_id = ?,
+            content_type = ?,
+            title = ?,
+            author = ?,
+            channel = ?,
+            last_seen = ?,
+            status = 'active'
+        WHERE url = ? AND source_name = ?
+    """, (
+        opdb_id,
+        group_id,
+        new["content_type"],
+        new["title"],
+        new.get("author"),
+        new.get("channel"),
+        today,
+        existing["url"],
+        existing["source_name"],
+    ))
 
-    changed_titles = sorted(
-        url
-        for url in (old_active_urls & new_urls)
-        if old_active_map[url] != new_map[url]
-    )
 
-    reappeared_urls = sorted(new_urls & old_removed_urls)
+def mark_link_removed(conn: sqlite3.Connection, url: str, source_name: str):
+    conn.execute("""
+        UPDATE links
+        SET status = 'removed'
+        WHERE url = ? AND source_name = ?
+    """, (url, source_name))
 
-    has_changes = bool(added_urls or removed_urls or changed_titles or reappeared_urls)
+
+def sync_source_records(
+    conn: sqlite3.Connection,
+    source: dict,
+    new_records: list[dict],
+    today: str,
+) -> dict:
+    source_name = source["name"]
+
+    existing_records = read_links_for_source(conn, source_name)
+
+    existing_by_url = {record["url"]: record for record in existing_records}
+    new_by_url = {record["url"]: record for record in new_records}
+
+    added_urls = []
+    removed_urls = []
+    changed_urls = []
+    reappeared_urls = []
+
+    for url, new_record in new_by_url.items():
+        if url not in existing_by_url:
+            insert_link(conn, new_record)
+            added_urls.append(url)
+            continue
+
+        existing = existing_by_url[url]
+
+        if existing["status"] == "removed":
+            reappeared_urls.append(url)
+
+        if (
+            existing["title"] != new_record["title"]
+            or existing.get("author") != new_record.get("author")
+            or existing.get("channel") != new_record.get("channel")
+            or existing.get("content_type") != new_record.get("content_type")
+            or (
+                new_record.get("opdb_id") is not None
+                and existing.get("opdb_id") != new_record.get("opdb_id")
+            )
+            or (
+                new_record.get("group_id") is not None
+                and existing.get("group_id") != new_record.get("group_id")
+            )
+        ):
+            changed_urls.append(url)
+
+        update_link_from_scrape(conn, existing, new_record, today)
+
+    for url, existing in existing_by_url.items():
+        if existing["status"] == "active" and url not in new_by_url:
+            mark_link_removed(conn, url, source_name)
+            removed_urls.append(url)
+
+    conn.commit()
 
     return {
-        "has_changes": has_changes,
-        "added_urls": added_urls,
-        "removed_urls": removed_urls,
-        "changed_titles": changed_titles,
-        "reappeared_urls": reappeared_urls,
+        "has_changes": bool(added_urls or removed_urls or changed_urls or reappeared_urls),
+        "added_urls": sorted(added_urls),
+        "removed_urls": sorted(removed_urls),
+        "changed_urls": sorted(changed_urls),
+        "reappeared_urls": sorted(reappeared_urls),
     }
-
-
-def archive_db(source_name: str):
-    archive_dir = os.path.join(DATA_DIR, "archive")
-    os.makedirs(archive_dir, exist_ok=True)
-
-    source_path = get_db_path(source_name)
-    archive_path = os.path.join(
-        archive_dir,
-        f"{source_name}_{date.today().isoformat()}.db"
-    )
-
-    shutil.copy2(source_path, archive_path)
-    print(f"Archived to {archive_path}")

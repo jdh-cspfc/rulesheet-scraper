@@ -22,126 +22,189 @@ The scraper is working and has 8 sources:
 * PinballVideos_Tutorials
 * Kineticist_Tutorials
 
-Each source currently writes to its own SQLite `.db` file in a `data/` directory.
+---
 
-### Core Behavior
+## Database Architecture (Updated)
 
-* The scraper diffs each run against the previous DB
-* If changes are detected:
+The scraper now uses a **single shared SQLite database**:
 
-  * The old DB is archived
-  * A fresh DB is written
-* If no changes:
+```
+data/main.db
+```
 
-  * The source is skipped
+### Tables
 
-There is also a `capture.py` script that snapshots source pages locally for offline testing. The scraper supports a `--cache` flag to use these snapshots instead of hitting live servers.
+#### machines (not yet populated)
+
+Stores canonical machine data from OPDB.
+
+```
+opdb_id       TEXT PRIMARY KEY  
+name          TEXT  
+manufacturer  TEXT  
+year          INTEGER  
+group_id      TEXT  
+```
+
+#### links (actively used)
+
+Stores all scraped links across all sources.
+
+```
+id            INTEGER PRIMARY KEY AUTOINCREMENT  
+opdb_id       TEXT (nullable, filled by enrichment)  
+group_id      TEXT (nullable)  
+url           TEXT  
+source_name   TEXT  
+content_type  TEXT  
+title         TEXT  
+author        TEXT  
+channel       TEXT  
+first_seen    DATE  
+last_seen     DATE  
+status        TEXT (active, removed)  
+UNIQUE (source_name, url)
+```
+
+---
+
+## Core Scraper Behavior (Current)
+
+The scraper now performs **in-place synchronization per source**:
+
+For each source:
+
+1. Scrape current links
+2. Load existing links for that `source_name`
+3. Diff old vs new
+4. Apply updates directly to `links` table
+
+### State Transitions
+
+**New link**
+
+* Insert row
+* `first_seen = today`
+* `last_seen = today`
+* `status = active`
+
+**Existing link (still present)**
+
+* Update fields (title, author, etc.)
+* `last_seen = today`
+* `status = active`
+
+**Missing link (was active)**
+
+* `status = removed`
+* `last_seen` is NOT updated (represents last time seen active)
+
+**Reappeared link**
+
+* `status = active`
+* `last_seen = today`
+* `first_seen` preserved
+
+### Important Semantics
+
+* `first_seen` = first time ever observed
+* `last_seen` = last time confirmed active
+* `status` = current state
 
 ---
 
 ## Logging (Implemented)
 
-Each scraper run now generates a JSON log file in a `logs/` directory.
+Each scraper run generates a JSON log file in `logs/`.
 
-### Log contents per source:
+### Per-source log data:
 
 * source_name
 * links_added
 * links_removed
 * total_active_links
-* new_links (list of URLs)
-* removed_links (list of URLs)
-* warnings (list of warning messages)
+* new_links
+* removed_links
+* warnings
 
-This acts as a lightweight observability/debug layer for scraper behavior over time.
+Logging is driven by the same diff logic used for DB updates.
 
 ---
 
 ## Kineticist Fix (Resolved)
 
-Kineticist scraping previously had two issues:
+Kineticist scraping now correctly extracts machine names and authors.
 
-1. Title extraction returned messy article text instead of machine name
-2. Author extraction returned multiple contributors (including non-authors)
+### Machine Name
 
-### Current solution:
+Extracted from a metadata block:
 
-**Machine Name**
+```html
+<div class="flex flex-wrap gap-x-3 gap-y-1">
+  <a href="/games/pinball/...">Machine Name</a>
+</div>
+```
 
-* Extracted from a dedicated metadata section on the page:
+Selector:
 
-  ```html
-  <div class="flex flex-wrap gap-x-3 gap-y-1">
-    <a href="/games/pinball/...">Machine Name</a>
-  </div>
-  ```
-* Selector used:
+```css
+div.flex.flex-wrap.gap-x-3.gap-y-1 a[href^='/games/pinball/']
+```
 
-  ```css
-  div.flex.flex-wrap.gap-x-3.gap-y-1 a[href^='/games/pinball/']
-  ```
-* This avoids:
+This avoids:
 
-  * nav bar links (e.g. "Best Machines")
-  * body links
-  * malformed text
+* nav bar links (e.g. "Best Machines")
+* body links
+* malformed text
 
-**Author**
+### Author
 
-* Extracted from:
+Extracted from:
 
-  ```html
-  <meta property="article:author" content="Author Name">
-  ```
-* Uses attribute-based extraction (`content`)
+```html
+<meta property="article:author" content="Author Name">
+```
 
-### Result:
+### Result
 
 * Clean machine names (e.g. "AC/DC")
-* Single correct author (e.g. "James McFatter")
+* Correct single author
 
 ---
 
 ## Key Files
 
-* `scraper.py` — main scraper + diff + logging
-* `db.py` — SQLite helpers
-* `sources.json` — source configuration
-* `capture.py` — cache snapshots for offline testing
+* `scraper.py` — scraping + sync + logging
+* `db.py` — database schema + sync logic
+* `sources.json` — source definitions
+* `capture.py` — offline cache support
 
 ---
 
 ## Architecture Notes
 
-* Scraping is config-driven via `sources.json`
-
+* Scraping is config-driven
 * Each source defines:
 
-  * selector strategy
-  * optional JSON parsing
-  * optional fetch_title behavior
-
-* Title and author extraction can be overridden per source
-
-* Diffing is done per source using:
-
-  * URL comparison
-  * title change detection
-  * removed/reappeared detection
+  * selectors
+  * JSON parsing (optional)
+  * title/author extraction (optional)
+* All sources write into the same `links` table
+* Diffing is scoped per `source_name`
 
 ---
 
-## The Plan Going Forward (Execute in Order)
+## The Plan Going Forward
 
-### Step 2: Build `sync_opdb.py`
+### Step 1: Build `sync_opdb.py` (NEXT)
 
 The full OPDB dataset is available at:
 https://mp-data.sfo3.cdn.digitaloceanspaces.com/latest-opdb.json
 
 This script should:
 
-* Download the dataset
-* Populate a `machines` table in a new `main.db`
+* Download dataset
+* Populate `machines` table in `main.db`
 
 #### Important OPDB concepts:
 
@@ -149,91 +212,50 @@ This script should:
 * Machines belong to a `group_id`
 
   * Reskins/rethemes share a group
-  * Rules are usually identical, but not always
-* Below machines there are "variants" which are purely cosmetic differences — variants should be mapped up to their parent machine ID with no information loss
-
-#### Schema (minimum):
-
-machines
-opdb_id       TEXT PRIMARY KEY
-name          TEXT
-manufacturer  TEXT
-year          INTEGER
-group_id      TEXT
+  * Rules are usually identical (but not always)
+* Variants should map to parent machine
 
 ---
 
-### Step 3: Create `main.db` schema and migrate scraper
-
-Move from per-source DBs → unified database.
-
-#### Schema:
-
-machines
-opdb_id       TEXT PRIMARY KEY
-name          TEXT
-manufacturer  TEXT
-year          INTEGER
-group_id      TEXT
-
-links
-id            INTEGER PRIMARY KEY AUTOINCREMENT
-opdb_id       TEXT (nullable, filled by enrichment)
-group_id      TEXT (nullable)
-url           TEXT UNIQUE
-source_name   TEXT
-content_type  TEXT (rulesheet, tutorial, tips)
-title         TEXT
-author        TEXT
-channel       TEXT
-first_seen    DATE
-last_seen     DATE
-status        TEXT (active, removed)
-
-#### Notes:
-
-* Wipe old per-source DBs
-* Diff logic remains the same but scoped by `source_name`
-
----
-
-### Step 4: Build `sync_pintips.py`
-
-Pintips URL format:
-https://app.matchplay.events/opdb/entries/{opdb_id}/pintips
-
-This script should:
-
-* Iterate all machines in `main.db`
-* Insert Pintips links into `links` table
-* No scraping required
-
----
-
-### Step 5: Fuzzy Matching / Enrichment
+### Step 2: Enrichment (Match links → machines)
 
 Goal:
-Populate `opdb_id` for links missing it.
+Populate `opdb_id` in `links`
 
 Approach:
 
-* Use `rapidfuzz` or similar
-* Match link titles → machines table
+* Use fuzzy matching (`rapidfuzz`)
+* Match `title` → `machines.name`
 * High confidence → auto assign
 * Low confidence → manual review
 
-#### Sources with built-in OPDB data:
+#### Sources with built-in IDs:
 
 * BobsGuide → provides `opdb_id`
 * PinballVideos → provides `opdb_id`
-* PinballPrimer → URLs contain `group_id` (extract via regex)
+* PinballPrimer → URLs contain `group_id`
+
+---
+
+### Step 3: Build `sync_pintips.py`
+
+Generate Pintips links:
+
+```
+https://app.matchplay.events/opdb/entries/{opdb_id}/pintips
+```
+
+Insert into `links` table.
+
+No scraping required.
 
 ---
 
 ## Known Future Enhancements
 
+* Extract OPDB IDs directly from Kineticist `/games/pinball/...` URLs
 * Add PinballRebel (instruction cards)
-* Possibly ignore Stern PDFs (no reliable index)
+* Possibly ignore Stern PDFs
 
 ---
 

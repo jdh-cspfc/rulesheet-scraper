@@ -97,15 +97,16 @@ def build_record(
     title: str,
     author: str | None = None,
     opdb_id: str | None = None,
+    group_id: str | None = None,
     channel: str | None = None,
 ) -> dict:
     return {
         "url": url,
-        "source": source["url"],
         "source_name": source["name"],
         "title": title,
         "author": author,
         "opdb_id": opdb_id,
+        "group_id": group_id,
         "channel": channel,
         "first_seen": today,
         "last_seen": today,
@@ -148,9 +149,7 @@ def fetch_title_from_page(
     title_attribute: str | None = None,
     author_attribute: str | None = None
 ) -> tuple[str | None, str | None, str | None]:
-    """Fetch an article page and extract title and optionally author using CSS selectors.
-    Returns (title, author, warning) — title/author may be None, warning is None unless something failed.
-    """
+    """Fetch an article page and extract title and optionally author using CSS selectors."""
     try:
         if use_cache:
             slug = slugify_url(url)
@@ -444,7 +443,7 @@ def scrape_html_source(
                 title_strip_suffix=fetch_title.get("title_strip_suffix"),
                 title_attribute=fetch_title.get("title_attribute"),
                 author_attribute=fetch_title.get("author_attribute"),
-           )
+            )
 
             if warning:
                 add_warning(warnings, warning)
@@ -498,87 +497,87 @@ def scrape_source(source: dict, use_cache: bool = False) -> tuple[list[dict], li
     return records, warnings
 
 
-def build_log_entry(source_name: str, new_records: list[dict], diff: dict, warnings: list[str]) -> dict:
+def build_log_entry(source_name: str, total_active_links: int, stats: dict, warnings: list[str]) -> dict:
     return {
         "source_name": source_name,
-        "links_added": len(diff["added_urls"]),
-        "links_removed": len(diff["removed_urls"]),
-        "total_active_links": len(new_records),
-        "new_links": diff["added_urls"],
-        "removed_links": diff["removed_urls"],
+        "links_added": len(stats["added_urls"]),
+        "links_removed": len(stats["removed_urls"]),
+        "total_active_links": total_active_links,
+        "new_links": stats["added_urls"],
+        "removed_links": stats["removed_urls"],
         "warnings": warnings,
     }
 
 
-def print_diff_summary(diff: dict):
-    if diff["added_urls"]:
-        print(f"  Added: {len(diff['added_urls'])}")
-    if diff["removed_urls"]:
-        print(f"  Removed: {len(diff['removed_urls'])}")
-    if diff["changed_titles"]:
-        print(f"  Title changes: {len(diff['changed_titles'])}")
-    if diff["reappeared_urls"]:
-        print(f"  Reappeared: {len(diff['reappeared_urls'])}")
+def print_diff_summary(stats: dict):
+    if stats["added_urls"]:
+        print(f"  Added: {len(stats['added_urls'])}")
+    if stats["removed_urls"]:
+        print(f"  Removed: {len(stats['removed_urls'])}")
+    if stats["changed_urls"]:
+        print(f"  Changed: {len(stats['changed_urls'])}")
+    if stats["reappeared_urls"]:
+        print(f"  Reappeared: {len(stats['reappeared_urls'])}")
 
 
-def build_removed_records(
-    old_active: list[dict],
-    old_removed: list[dict],
-    new_url_set: set[str],
-    source: dict,
-    today: str,
-) -> list[dict]:
-    carried_removed = []
+def run(use_cache: bool = False):
+    run_log = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "sources": [],
+    }
 
-    for old_record in old_active:
-        if old_record["url"] in new_url_set:
-            continue
-
-        carried_removed.append({
-            "url": old_record["url"],
-            "source": source["url"],
-            "source_name": source["name"],
-            "title": old_record["title"],
-            "author": old_record.get("author"),
-            "opdb_id": old_record.get("opdb_id"),
-            "channel": old_record.get("channel"),
-            "first_seen": old_record["first_seen"],
-            "last_seen": today,
-            "status": "removed",
-            "content_type": source.get("content_type"),
-        })
-
-    for old_record in old_removed:
-        if old_record["url"] in new_url_set:
-            continue
-
-        carried_removed.append({
-            "url": old_record["url"],
-            "source": old_record["source"],
-            "source_name": old_record["source_name"],
-            "title": old_record["title"],
-            "author": old_record.get("author"),
-            "opdb_id": old_record.get("opdb_id"),
-            "channel": old_record.get("channel"),
-            "first_seen": old_record["first_seen"],
-            "last_seen": old_record["last_seen"],
-            "status": "removed",
-            "content_type": source.get("content_type"),
-        })
-
-    return carried_removed
-
-
-def write_fresh_db(db_path: str, active_records: list[dict], removed_records: list[dict] | None = None):
-    if removed_records is None:
-        removed_records = []
+    sources = load_sources()
+    db_path = db.get_main_db_path()
 
     conn = sqlite3.connect(db_path)
     db.init_db(conn)
-    db.write_records(conn, active_records)
-    if removed_records:
-        db.write_records(conn, removed_records)
+
+    for source in sources:
+        print(f"Scraping {source['name']}...")
+        new_records, warnings = scrape_source(source, use_cache=use_cache)
+        print(f"Found {len(new_records)} links")
+
+        if not new_records and warnings:
+            skip_message = "DB sync skipped because scrape returned 0 records with warnings."
+            add_warning(warnings, skip_message)
+
+            total_active_links = db.count_active_links_for_source(conn, source["name"])
+            empty_stats = {
+                "added_urls": [],
+                "removed_urls": [],
+                "changed_urls": [],
+                "reappeared_urls": [],
+            }
+
+            run_log["sources"].append(
+                build_log_entry(source["name"], total_active_links, empty_stats, warnings)
+            )
+            continue
+
+        today = date.today().isoformat()
+
+        stats = db.sync_source_records(
+            conn=conn,
+            source=source,
+            new_records=new_records,
+            today=today,
+        )
+
+        total_active_links = db.count_active_links_for_source(conn, source["name"])
+
+        run_log["sources"].append(
+            build_log_entry(source["name"], total_active_links, stats, warnings)
+        )
+
+        if not stats["has_changes"]:
+            print(f"No changes detected for {source['name']}, skipping...")
+            continue
+
+        print_diff_summary(stats)
+        print(f"Synchronized {source['name']} in {db_path}")
+
     conn.close()
+    write_run_log(run_log)
 
 
 def write_run_log(run_log: dict):
@@ -591,73 +590,6 @@ def write_run_log(run_log: dict):
         json.dump(run_log, f, indent=2)
 
     print(f"Log written to {log_path}")
-
-
-def run(use_cache: bool = False):
-    run_log = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "sources": [],
-    }
-
-    sources = load_sources()
-
-    for source in sources:
-        print(f"Scraping {source['name']}...")
-        new_records, warnings = scrape_source(source, use_cache=use_cache)
-        print(f"Found {len(new_records)} links")
-
-        db_path = db.get_db_path(source["name"])
-        today = date.today().isoformat()
-
-        if not os.path.exists(db_path):
-            print("No existing DB found, writing fresh...")
-            write_fresh_db(db_path, active_records=new_records)
-            print(f"Written to {db_path}")
-
-            initial_diff = {
-                "added_urls": sorted(record["url"] for record in new_records),
-                "removed_urls": [],
-            }
-
-            run_log["sources"].append(
-                build_log_entry(source["name"], new_records, initial_diff, warnings)
-            )
-            continue
-
-        conn = sqlite3.connect(db_path)
-        old_active = db.read_active_records(conn)
-        old_removed = db.read_removed_records(conn)
-        conn.close()
-
-        diff = db.get_diff_details(old_active, old_removed, new_records)
-
-        run_log["sources"].append(
-            build_log_entry(source["name"], new_records, diff, warnings)
-        )
-
-        if not diff["has_changes"]:
-            print(f"No changes detected for {source['name']}, skipping...")
-            continue
-
-        print_diff_summary(diff)
-
-        print(f"Changes detected for {source['name']}, archiving and writing fresh DB...")
-        db.archive_db(source["name"])
-
-        new_url_set = {record["url"] for record in new_records}
-        removed_records = build_removed_records(
-            old_active=old_active,
-            old_removed=old_removed,
-            new_url_set=new_url_set,
-            source=source,
-            today=today,
-        )
-
-        os.remove(db_path)
-        write_fresh_db(db_path, active_records=new_records, removed_records=removed_records)
-        print(f"Written to {db_path}")
-
-    write_run_log(run_log)
 
 
 if __name__ == "__main__":
