@@ -76,5 +76,17 @@
             "url_template": "https://www.youtube.com/watch?v={id}"
         },
         "content_type": "tutorial"
+    },
+    {
+        "name": "Kineticist_Tutorials",
+        "url": "https://www.kineticist.com/news/category/pinball-tutorial",
+        "selector": "a[href^='/news/'][href*='tutorial']",
+        "fetch_title": {
+            "title_selector": "div.flex.flex-wrap.gap-x-3.gap-y-1 a[href^='/games/pinball/']",
+            "author_selector": "meta[property='article:author']",
+            "author_attribute": "content",
+            "delay": 1
+        },
+        "content_type": "tutorial"
     }
 ]
