@@ -295,7 +295,10 @@ def upsert_machine(conn: sqlite3.Connection, record: dict):
     ))
 
 
-def clear_links_machine_ids(conn: sqlite3.Connection, machine_ids: list[str]) -> int:
+def clear_links_identity_fields_for_machine_ids(
+    conn: sqlite3.Connection,
+    machine_ids: list[str],
+) -> int:
     if not machine_ids:
         return 0
 
@@ -303,7 +306,10 @@ def clear_links_machine_ids(conn: sqlite3.Connection, machine_ids: list[str]) ->
 
     cursor = conn.execute(f"""
         UPDATE links
-        SET machine_id = NULL
+        SET
+            machine_id = NULL,
+            group_id = NULL,
+            alias_id = NULL
         WHERE machine_id IN ({placeholders})
     """, machine_ids)
 
@@ -341,7 +347,7 @@ def sync_machine_records(conn: sqlite3.Connection, records: list[dict]) -> dict:
 
     removed_machine_ids = sorted(existing_ids - incoming_ids)
 
-    links_cleared = clear_links_machine_ids(conn, removed_machine_ids)
+    links_cleared = clear_links_identity_fields_for_machine_ids(conn, removed_machine_ids)
     machines_deleted = delete_machines_by_id(conn, removed_machine_ids)
 
     conn.commit()

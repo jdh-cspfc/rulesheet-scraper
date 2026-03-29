@@ -255,8 +255,9 @@ No scraping required.
 ## Known Future Enhancements
 
 * Create manufacturer field in main.db, this data is available to scrape directly from some sources. Some machine titles include manufacture information that we can split into a separate field and use to help with the fuzzy matching later.
-* Add PinballRebel (instruction cards)
-* Possibly ignore Stern PDFs
+* Add PinballRebel as a source (instruction cards)
+* Add JLP's pinball cards as source (https://cards.pinballcards.net/pinballcards)
+* What to do regarding official Stern PDFs? No single source of links. Manual collection seems tiresome, and per game links likely change after code updates?
 
 ---
 

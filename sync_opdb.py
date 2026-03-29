@@ -88,7 +88,7 @@ def print_summary(summary: dict):
     print(f"  Inserted: {summary['inserted']}")
     print(f"  Updated: {summary['updated']}")
     print(f"  Deleted: {summary['deleted']}")
-    print(f"  Links cleared: {summary['links_cleared']}")
+    print(f"  Links identity-cleared: {summary['links_cleared']}")
     print(f"  Total canonical machines in feed: {summary['total_in_feed']}")
 
     removed_count = len(summary["removed_machine_ids"])
