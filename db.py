@@ -14,7 +14,7 @@ def get_main_db_path() -> str:
 def init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS machines (
-            machine_id      TEXT PRIMARY KEY,
+            machine_id   TEXT PRIMARY KEY,
             name         TEXT,
             manufacturer TEXT,
             year         INTEGER,
@@ -25,7 +25,7 @@ def init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS links (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            machine_id      TEXT,
+            machine_id   TEXT,
             group_id     TEXT,
             alias_id     TEXT,
             url          TEXT NOT NULL,
@@ -260,4 +260,97 @@ def sync_source_records(
         "removed_urls": sorted(removed_urls),
         "changed_urls": sorted(changed_urls),
         "reappeared_urls": sorted(reappeared_urls),
+    }
+
+
+def read_all_machine_ids(conn: sqlite3.Connection) -> set[str]:
+    cursor = conn.execute("""
+        SELECT machine_id
+        FROM machines
+    """)
+
+    return {row[0] for row in cursor.fetchall()}
+
+
+def upsert_machine(conn: sqlite3.Connection, record: dict):
+    conn.execute("""
+        INSERT INTO machines (
+            machine_id,
+            name,
+            manufacturer,
+            year,
+            group_id
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(machine_id) DO UPDATE SET
+            name = excluded.name,
+            manufacturer = excluded.manufacturer,
+            year = excluded.year,
+            group_id = excluded.group_id
+    """, (
+        record["machine_id"],
+        record.get("name"),
+        record.get("manufacturer"),
+        record.get("year"),
+        record.get("group_id"),
+    ))
+
+
+def clear_links_machine_ids(conn: sqlite3.Connection, machine_ids: list[str]) -> int:
+    if not machine_ids:
+        return 0
+
+    placeholders = ",".join("?" for _ in machine_ids)
+
+    cursor = conn.execute(f"""
+        UPDATE links
+        SET machine_id = NULL
+        WHERE machine_id IN ({placeholders})
+    """, machine_ids)
+
+    return cursor.rowcount
+
+
+def delete_machines_by_id(conn: sqlite3.Connection, machine_ids: list[str]) -> int:
+    if not machine_ids:
+        return 0
+
+    placeholders = ",".join("?" for _ in machine_ids)
+
+    cursor = conn.execute(f"""
+        DELETE FROM machines
+        WHERE machine_id IN ({placeholders})
+    """, machine_ids)
+
+    return cursor.rowcount
+
+
+def sync_machine_records(conn: sqlite3.Connection, records: list[dict]) -> dict:
+    existing_ids = read_all_machine_ids(conn)
+    incoming_ids = {record["machine_id"] for record in records}
+
+    inserted = 0
+    updated = 0
+
+    for record in records:
+        if record["machine_id"] in existing_ids:
+            updated += 1
+        else:
+            inserted += 1
+
+        upsert_machine(conn, record)
+
+    removed_machine_ids = sorted(existing_ids - incoming_ids)
+
+    links_cleared = clear_links_machine_ids(conn, removed_machine_ids)
+    machines_deleted = delete_machines_by_id(conn, removed_machine_ids)
+
+    conn.commit()
+
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "deleted": machines_deleted,
+        "links_cleared": links_cleared,
+        "removed_machine_ids": removed_machine_ids,
+        "total_in_feed": len(records),
     }
