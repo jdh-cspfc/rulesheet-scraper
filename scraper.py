@@ -106,10 +106,10 @@ def first_text_node(element) -> str | None:
 
 def classify_opdb_like_id(raw_id: str | None) -> tuple[str | None, str | None, str | None]:
     """
-    Returns (group_id, opdb_id, alias_id) based on OPDB-style ID structure.
+    Returns (group_id, machine_id, alias_id) based on OPDB-style ID structure.
 
     group_id example: G5W6N
-    opdb_id example: G5W6N-MLe6V
+    machine_id example: G5W6N-MLe6V
     alias_id example: G5W6N-MLe6V-A9Y63
     """
     if not raw_id:
@@ -127,9 +127,9 @@ def classify_opdb_like_id(raw_id: str | None) -> tuple[str | None, str | None, s
 
     if len(parts) == 3:
         group_id = parts[0]
-        opdb_id = f"{parts[0]}-{parts[1]}"
+        machine_id = f"{parts[0]}-{parts[1]}"
         alias_id = raw_id
-        return group_id, opdb_id, alias_id
+        return group_id, machine_id, alias_id
 
     return None, None, None
 
@@ -140,7 +140,7 @@ def build_record(
     url: str,
     title: str,
     author: str | None = None,
-    opdb_id: str | None = None,
+    machine_id: str | None = None,
     group_id: str | None = None,
     alias_id: str | None = None,
     channel: str | None = None,
@@ -150,7 +150,7 @@ def build_record(
         "source_name": source["name"],
         "title": title,
         "author": author,
-        "opdb_id": opdb_id,
+        "machine_id": machine_id,
         "group_id": group_id,
         "alias_id": alias_id,
         "channel": channel,
@@ -312,7 +312,7 @@ def scrape_json_in_script_source(
         if not name or not raw_id:
             continue
 
-        group_id, opdb_id, alias_id = classify_opdb_like_id(raw_id)
+        group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
 
         url_path = config["url_template"].replace("{id}", raw_id)
         full_url = source["base_url"] + url_path
@@ -323,7 +323,7 @@ def scrape_json_in_script_source(
             url=full_url,
             title=name,
             author=None,
-            opdb_id=opdb_id,
+            machine_id=machine_id,
             group_id=group_id,
             alias_id=alias_id,
             channel=None,
@@ -379,8 +379,8 @@ def scrape_json_api_source(
         machine = machines.get(machine_id, {})
         title = machine.get("name") or f"Tutorial Video {youtube_id}"
 
-        raw_id = machine.get("opdb_id")
-        group_id, opdb_id, alias_id = classify_opdb_like_id(raw_id)
+        raw_id = machine.get("machine_id")
+        group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
 
         channel = video.get("channel")
 
@@ -399,7 +399,7 @@ def scrape_json_api_source(
             url=full_url,
             title=title,
             author=author,
-            opdb_id=opdb_id,
+            machine_id=machine_id,
             group_id=group_id,
             alias_id=alias_id,
             channel=channel,

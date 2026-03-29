@@ -14,7 +14,7 @@ def get_main_db_path() -> str:
 def init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS machines (
-            opdb_id      TEXT PRIMARY KEY,
+            machine_id      TEXT PRIMARY KEY,
             name         TEXT,
             manufacturer TEXT,
             year         INTEGER,
@@ -25,7 +25,7 @@ def init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS links (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            opdb_id      TEXT,
+            machine_id      TEXT,
             group_id     TEXT,
             alias_id     TEXT,
             url          TEXT NOT NULL,
@@ -57,8 +57,8 @@ def init_db(conn: sqlite3.Connection):
     """)
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_links_opdb_id
-        ON links (opdb_id)
+        CREATE INDEX IF NOT EXISTS idx_links_machine_id
+        ON links (machine_id)
     """)
 
     conn.execute("""
@@ -78,7 +78,7 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
     cursor = conn.execute("""
         SELECT
             id,
-            opdb_id,
+            machine_id,
             group_id,
             alias_id,
             url,
@@ -97,7 +97,7 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
     return [
         {
             "id": row[0],
-            "opdb_id": row[1],
+            "machine_id": row[1],
             "group_id": row[2],
             "alias_id": row[3],
             "url": row[4],
@@ -127,7 +127,7 @@ def count_active_links_for_source(conn: sqlite3.Connection, source_name: str) ->
 def insert_link(conn: sqlite3.Connection, record: dict):
     conn.execute("""
         INSERT INTO links (
-            opdb_id,
+            machine_id,
             group_id,
             alias_id,
             url,
@@ -141,7 +141,7 @@ def insert_link(conn: sqlite3.Connection, record: dict):
             status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        record.get("opdb_id"),
+        record.get("machine_id"),
         record.get("group_id"),
         record.get("alias_id"),
         record["url"],
@@ -157,14 +157,14 @@ def insert_link(conn: sqlite3.Connection, record: dict):
 
 
 def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict, today: str):
-    opdb_id = new.get("opdb_id") if new.get("opdb_id") is not None else existing.get("opdb_id")
+    machine_id = new.get("machine_id") if new.get("machine_id") is not None else existing.get("machine_id")
     group_id = new.get("group_id") if new.get("group_id") is not None else existing.get("group_id")
     alias_id = new.get("alias_id") if new.get("alias_id") is not None else existing.get("alias_id")
 
     conn.execute("""
         UPDATE links
         SET
-            opdb_id = ?,
+            machine_id = ?,
             group_id = ?,
             alias_id = ?,
             content_type = ?,
@@ -175,7 +175,7 @@ def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict,
             status = 'active'
         WHERE url = ? AND source_name = ?
     """, (
-        opdb_id,
+        machine_id,
         group_id,
         alias_id,
         new["content_type"],
@@ -231,8 +231,8 @@ def sync_source_records(
             or existing.get("channel") != new_record.get("channel")
             or existing.get("content_type") != new_record.get("content_type")
             or (
-                new_record.get("opdb_id") is not None
-                and existing.get("opdb_id") != new_record.get("opdb_id")
+                new_record.get("machine_id") is not None
+                and existing.get("machine_id") != new_record.get("machine_id")
             )
             or (
                 new_record.get("group_id") is not None

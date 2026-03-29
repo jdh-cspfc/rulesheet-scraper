@@ -39,7 +39,7 @@ data/main.db
 Stores canonical machine data from OPDB.
 
 ```
-opdb_id       TEXT PRIMARY KEY  
+machine_id       TEXT PRIMARY KEY  
 name          TEXT  
 manufacturer  TEXT  
 year          INTEGER  
@@ -52,7 +52,7 @@ Stores all scraped links across all sources.
 
 ```
 id            INTEGER PRIMARY KEY AUTOINCREMENT  
-opdb_id       TEXT (nullable, filled by enrichment)  
+machine_id       TEXT (nullable, filled by enrichment)  
 group_id      TEXT (nullable)  
 url           TEXT  
 source_name   TEXT  
@@ -200,6 +200,7 @@ Extracted from:
 
 The full OPDB dataset is available at:
 https://mp-data.sfo3.cdn.digitaloceanspaces.com/latest-opdb.json
+latest-opdb.json is a local copy of this web source
 
 This script should:
 
@@ -208,7 +209,7 @@ This script should:
 
 #### Important OPDB concepts:
 
-* Each machine has a unique `opdb_id`
+* Each machine has a unique `machine_id`
 * Machines belong to a `group_id`
 
   * Reskins/rethemes share a group
@@ -220,7 +221,7 @@ This script should:
 ### Step 2: Enrichment (Match links → machines)
 
 Goal:
-Populate `opdb_id` in `links`
+Populate `machine_id` in `links`
 
 Approach:
 
@@ -231,8 +232,8 @@ Approach:
 
 #### Sources with built-in IDs:
 
-* BobsGuide → provides `opdb_id`
-* PinballVideos → provides `opdb_id`
+* BobsGuide → provides `machine_id`
+* PinballVideos → provides `machine_id`
 * PinballPrimer → URLs contain `group_id`
 
 ---
@@ -242,7 +243,7 @@ Approach:
 Generate Pintips links:
 
 ```
-https://app.matchplay.events/opdb/entries/{opdb_id}/pintips
+https://app.matchplay.events/opdb/entries/{machine_id}/pintips
 ```
 
 Insert into `links` table.
@@ -253,7 +254,7 @@ No scraping required.
 
 ## Known Future Enhancements
 
-* Extract OPDB IDs directly from Kineticist `/games/pinball/...` URLs
+* Create manufacturer field in main.db, this data is available to scrape directly from some sources. Some machine titles include manufacture information that we can split into a separate field and use to help with the fuzzy matching later.
 * Add PinballRebel (instruction cards)
 * Possibly ignore Stern PDFs
 
