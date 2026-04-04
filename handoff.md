@@ -24,9 +24,9 @@ The scraper is working and has 8 sources:
 
 ---
 
-## Database Architecture (Updated)
+## Database Architecture (Current)
 
-The scraper now uses a **single shared SQLite database**:
+The project uses a **single shared SQLite database**:
 
 ```
 data/main.db
@@ -34,26 +34,31 @@ data/main.db
 
 ### Tables
 
-#### machines (not yet populated)
+#### machines (ACTIVE)
 
 Stores canonical machine data from OPDB.
 
+This table is now **fully populated and kept in sync with OPDB** via `sync_opdb.py`.
+
 ```
-machine_id       TEXT PRIMARY KEY  
+machine_id    TEXT PRIMARY KEY  
 name          TEXT  
 manufacturer  TEXT  
 year          INTEGER  
 group_id      TEXT  
 ```
 
-#### links (actively used)
+---
+
+#### links (ACTIVE)
 
 Stores all scraped links across all sources.
 
 ```
 id            INTEGER PRIMARY KEY AUTOINCREMENT  
-machine_id       TEXT (nullable, filled by enrichment)  
+machine_id    TEXT (nullable, canonical OPDB ID)  
 group_id      TEXT (nullable)  
+alias_id      TEXT (nullable)  
 url           TEXT  
 source_name   TEXT  
 content_type  TEXT  
@@ -68,9 +73,9 @@ UNIQUE (source_name, url)
 
 ---
 
-## Core Scraper Behavior (Current)
+## Core Scraper Behavior
 
-The scraper now performs **in-place synchronization per source**:
+The scraper performs **in-place synchronization per source**:
 
 For each source:
 
@@ -97,7 +102,7 @@ For each source:
 **Missing link (was active)**
 
 * `status = removed`
-* `last_seen` is NOT updated (represents last time seen active)
+* `last_seen` is NOT updated
 
 **Reappeared link**
 
@@ -105,11 +110,81 @@ For each source:
 * `last_seen = today`
 * `first_seen` preserved
 
-### Important Semantics
+---
 
-* `first_seen` = first time ever observed
-* `last_seen` = last time confirmed active
-* `status` = current state
+## OPDB Integration (NEW)
+
+### `sync_opdb.py` (IMPLEMENTED)
+
+This script syncs canonical machine data from OPDB into the `machines` table.
+
+Source dataset:
+https://mp-data.sfo3.cdn.digitaloceanspaces.com/latest-opdb.json
+
+---
+
+### OPDB Data Model
+
+OPDB JSON contains:
+
+* `machineGroups` (group-level records)
+* `machines` (canonical machine records)
+* `aliases` (variants / editions)
+
+Only **canonical machines (2-part IDs)** are stored in the `machines` table.
+
+---
+
+### ID Structure
+
+OPDB-style IDs:
+
+```
+Group ID     → G5W6N
+Machine ID   → G5W6N-MLe6V
+Alias ID     → G5W6N-MLe6V-A9Y63
+```
+
+Scraper logic extracts:
+
+```
+(group_id, machine_id, alias_id)
+```
+
+---
+
+### Sync Behavior (IMPORTANT)
+
+`machines` table is a **true mirror of OPDB canonical machines**.
+
+Each sync:
+
+1. Upserts all current OPDB machine records
+2. Detects machine IDs no longer present in OPDB
+3. For removed machine IDs:
+
+   * Clears identity fields on matching links:
+
+     ```
+     machine_id = NULL
+     group_id   = NULL
+     alias_id   = NULL
+     ```
+   * Deletes those machine rows from `machines`
+
+---
+
+### Design Rationale
+
+* OPDB is treated as the **source of truth**
+* Stale IDs from external sources are considered **untrusted**
+* Clearing all identity fields prevents:
+
+  * partial/stale matches
+  * incorrect enrichment bias
+  * misleading "half-resolved" links
+
+Re-enrichment is expected to reassign correct IDs later.
 
 ---
 
@@ -117,7 +192,7 @@ For each source:
 
 Each scraper run generates a JSON log file in `logs/`.
 
-### Per-source log data:
+Per-source log data:
 
 * source_name
 * links_added
@@ -127,55 +202,15 @@ Each scraper run generates a JSON log file in `logs/`.
 * removed_links
 * warnings
 
-Logging is driven by the same diff logic used for DB updates.
-
----
-
-## Kineticist Fix (Resolved)
-
-Kineticist scraping now correctly extracts machine names and authors.
-
-### Machine Name
-
-Extracted from a metadata block:
-
-```html
-<div class="flex flex-wrap gap-x-3 gap-y-1">
-  <a href="/games/pinball/...">Machine Name</a>
-</div>
-```
-
-Selector:
-
-```css
-div.flex.flex-wrap.gap-x-3.gap-y-1 a[href^='/games/pinball/']
-```
-
-This avoids:
-
-* nav bar links (e.g. "Best Machines")
-* body links
-* malformed text
-
-### Author
-
-Extracted from:
-
-```html
-<meta property="article:author" content="Author Name">
-```
-
-### Result
-
-* Clean machine names (e.g. "AC/DC")
-* Correct single author
+Logging uses the same diff logic as DB sync.
 
 ---
 
 ## Key Files
 
 * `scraper.py` — scraping + sync + logging
-* `db.py` — database schema + sync logic
+* `db.py` — schema + link sync + machine sync
+* `sync_opdb.py` — OPDB → machines sync
 * `sources.json` — source definitions
 * `capture.py` — offline cache support
 
@@ -184,41 +219,38 @@ Extracted from:
 ## Architecture Notes
 
 * Scraping is config-driven
+
 * Each source defines:
 
   * selectors
   * JSON parsing (optional)
   * title/author extraction (optional)
-* All sources write into the same `links` table
+
+* All sources write into a shared `links` table
+
 * Diffing is scoped per `source_name`
+
+* Machine identity is layered:
+
+  * Source-provided IDs (scraper)
+  * Canonical IDs (OPDB + enrichment)
+
+---
+
+## Current Status Summary
+
+✔ Scraper stable across multiple sources
+✔ Diff-based syncing implemented
+✔ Logging implemented
+✔ OPDB sync implemented
+✔ Machines table populated and maintained
+✔ Identity clearing strategy implemented
 
 ---
 
 ## The Plan Going Forward
 
-### Step 1: Build `sync_opdb.py` (NEXT)
-
-The full OPDB dataset is available at:
-https://mp-data.sfo3.cdn.digitaloceanspaces.com/latest-opdb.json
-latest-opdb.json is a local copy of this web source
-
-This script should:
-
-* Download dataset
-* Populate `machines` table in `main.db`
-
-#### Important OPDB concepts:
-
-* Each machine has a unique `machine_id`
-* Machines belong to a `group_id`
-
-  * Reskins/rethemes share a group
-  * Rules are usually identical (but not always)
-* Variants should map to parent machine
-
----
-
-### Step 2: Enrichment (Match links → machines)
+### Step 2: Enrichment (NEXT)
 
 Goal:
 Populate `machine_id` in `links`
@@ -230,11 +262,15 @@ Approach:
 * High confidence → auto assign
 * Low confidence → manual review
 
-#### Sources with built-in IDs:
+---
+
+### Known Sources with IDs
 
 * BobsGuide → provides `machine_id`
-* PinballVideos → provides `machine_id`
+* PinballVideos → provides `group_id`
 * PinballPrimer → URLs contain `group_id`
+
+These should be prioritized and trusted over fuzzy matches.
 
 ---
 
@@ -257,6 +293,7 @@ No scraping required.
 * Create manufacturer field in main.db, this data is available to scrape directly from some sources. Some machine titles include manufacture information that we can split into a separate field and use to help with the fuzzy matching later.
 * Add PinballRebel as a source (instruction cards)
 * Add JLP's pinball cards as source (https://cards.pinballcards.net/pinballcards)
+* Add YPSI pinball cheat sheets as source
 * What to do regarding official Stern PDFs? No single source of links. Manual collection seems tiresome, and per game links likely change after code updates?
 
 ---
@@ -268,4 +305,5 @@ No scraping required.
 * BeautifulSoup
 * requests
 
-No framework yet — currently script-based. Web app and API planned later.
+Currently script-based.
+Web app and API planned later.

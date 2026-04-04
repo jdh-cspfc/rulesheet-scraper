@@ -134,6 +134,24 @@ def classify_opdb_like_id(raw_id: str | None) -> tuple[str | None, str | None, s
     return None, None, None
 
 
+def extract_opdb_id_from_url_for_source(source: dict, href: str, full_url: str) -> str | None:
+    """
+    Extract an OPDB-like ID from a URL for sources that encode it directly in the link.
+
+    PinballPrimer example:
+    https://pinballprimer.github.io/medieval_G5pe4.html
+    """
+    source_name = source.get("name")
+
+    if source_name == "PinballPrimer_RuleSheets":
+        filename = full_url.rsplit("/", 1)[-1]
+        match = re.search(r"_([A-Za-z0-9]+)\.html$", filename)
+        if match:
+            return match.group(1)
+
+    return None
+
+
 def build_record(
     source: dict,
     today: str,
@@ -375,11 +393,11 @@ def scrape_json_api_source(
         if not video:
             continue
 
-        machine_id = str(video.get("machine_id", ""))
-        machine = machines.get(machine_id, {})
+        source_machine_id = str(video.get("machine_id", ""))
+        machine = machines.get(source_machine_id, {})
         title = machine.get("name") or f"Tutorial Video {youtube_id}"
 
-        raw_id = machine.get("machine_id")
+        raw_id = machine.get("opdb_id")
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
 
         channel = video.get("channel")
@@ -485,6 +503,9 @@ def scrape_html_source(
 
         author = extract_author(a_tag, author_pattern)
 
+        raw_id = extract_opdb_id_from_url_for_source(source, href, full_url)
+        group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
+
         if fetch_title:
             time.sleep(fetch_title.get("delay", 1))
 
@@ -519,6 +540,9 @@ def scrape_html_source(
             url=full_url,
             title=title,
             author=author,
+            machine_id=machine_id,
+            group_id=group_id,
+            alias_id=alias_id,
         ))
 
     return deduplicate_records_preserve_order(results)
