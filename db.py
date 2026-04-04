@@ -28,6 +28,7 @@ def init_db(conn: sqlite3.Connection):
             machine_id   TEXT,
             group_id     TEXT,
             alias_id     TEXT,
+            manufacturer TEXT,
             url          TEXT NOT NULL,
             source_name  TEXT NOT NULL,
             content_type TEXT NOT NULL,
@@ -71,6 +72,11 @@ def init_db(conn: sqlite3.Connection):
         ON links (alias_id)
     """)
 
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_links_manufacturer
+        ON links (manufacturer)
+    """)
+
     conn.commit()
 
 
@@ -81,6 +87,7 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
             machine_id,
             group_id,
             alias_id,
+            manufacturer,
             url,
             source_name,
             content_type,
@@ -100,15 +107,16 @@ def read_links_for_source(conn: sqlite3.Connection, source_name: str) -> list[di
             "machine_id": row[1],
             "group_id": row[2],
             "alias_id": row[3],
-            "url": row[4],
-            "source_name": row[5],
-            "content_type": row[6],
-            "title": row[7],
-            "author": row[8],
-            "channel": row[9],
-            "first_seen": row[10],
-            "last_seen": row[11],
-            "status": row[12],
+            "manufacturer": row[4],
+            "url": row[5],
+            "source_name": row[6],
+            "content_type": row[7],
+            "title": row[8],
+            "author": row[9],
+            "channel": row[10],
+            "first_seen": row[11],
+            "last_seen": row[12],
+            "status": row[13],
         }
         for row in cursor.fetchall()
     ]
@@ -130,6 +138,7 @@ def insert_link(conn: sqlite3.Connection, record: dict):
             machine_id,
             group_id,
             alias_id,
+            manufacturer,
             url,
             source_name,
             content_type,
@@ -139,11 +148,12 @@ def insert_link(conn: sqlite3.Connection, record: dict):
             first_seen,
             last_seen,
             status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         record.get("machine_id"),
         record.get("group_id"),
         record.get("alias_id"),
+        record.get("manufacturer"),
         record["url"],
         record["source_name"],
         record["content_type"],
@@ -160,6 +170,7 @@ def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict,
     machine_id = new.get("machine_id") if new.get("machine_id") is not None else existing.get("machine_id")
     group_id = new.get("group_id") if new.get("group_id") is not None else existing.get("group_id")
     alias_id = new.get("alias_id") if new.get("alias_id") is not None else existing.get("alias_id")
+    manufacturer = new.get("manufacturer") if new.get("manufacturer") is not None else existing.get("manufacturer")
 
     conn.execute("""
         UPDATE links
@@ -167,6 +178,7 @@ def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict,
             machine_id = ?,
             group_id = ?,
             alias_id = ?,
+            manufacturer = ?,
             content_type = ?,
             title = ?,
             author = ?,
@@ -178,6 +190,7 @@ def update_link_from_scrape(conn: sqlite3.Connection, existing: dict, new: dict,
         machine_id,
         group_id,
         alias_id,
+        manufacturer,
         new["content_type"],
         new["title"],
         new.get("author"),
@@ -230,6 +243,10 @@ def sync_source_records(
             or existing.get("author") != new_record.get("author")
             or existing.get("channel") != new_record.get("channel")
             or existing.get("content_type") != new_record.get("content_type")
+            or (
+                new_record.get("manufacturer") is not None
+                and existing.get("manufacturer") != new_record.get("manufacturer")
+            )
             or (
                 new_record.get("machine_id") is not None
                 and existing.get("machine_id") != new_record.get("machine_id")

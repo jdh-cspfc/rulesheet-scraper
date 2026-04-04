@@ -16,6 +16,34 @@ import db
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; research-scraper/1.0)"}
 
 
+MANUFACTURER_ALIASES = {
+    "DE": "Data East",
+    "Data East": "Data East",
+    "Stern": "Stern",
+    "Stern Pinball": "Stern Pinball",
+    "JJP": "Jersey Jack Pinball",
+    "Jersey Jack Pinball": "Jersey Jack Pinball",
+    "Williams": "Williams",
+    "Bally": "Bally",
+    "Bally Williams": "Bally Williams",
+    "Gottlieb": "Gottlieb",
+    "Zaccaria": "Zaccaria",
+    "Game Plan": "Game Plan",
+    "Capcom": "Capcom",
+    "Spooky Pinball": "Spooky Pinball",
+    "American Pinball": "American Pinball",
+    "Chicago Gaming Company": "Chicago Gaming Company",
+    "CGC": "Chicago Gaming Company",
+    "Atari": "Atari",
+    "Premier": "Premier",
+    "Sega": "Sega",
+    "Jersey Jack": "Jersey Jack Pinball",
+    "Premier Gottlieb": "Premier Gottlieb",
+    "Stern Electronics": "Stern Electronics",
+    "Recel": "Recel",
+}
+
+
 def slugify_url(url: str) -> str:
     """Convert a URL to a safe cache filename — must match capture.py."""
     url = re.sub(r"https?://[^/]+", "", url)
@@ -134,6 +162,17 @@ def classify_opdb_like_id(raw_id: str | None) -> tuple[str | None, str | None, s
     return None, None, None
 
 
+def normalize_manufacturer(raw: str | None) -> str | None:
+    if not raw:
+        return None
+
+    cleaned = raw.strip()
+    if not cleaned:
+        return None
+
+    return MANUFACTURER_ALIASES.get(cleaned, cleaned)
+
+
 def extract_opdb_id_from_url_for_source(source: dict, href: str, full_url: str) -> str | None:
     """
     Extract an OPDB-like ID from a URL for sources that encode it directly in the link.
@@ -152,12 +191,51 @@ def extract_opdb_id_from_url_for_source(source: dict, href: str, full_url: str) 
     return None
 
 
+def extract_title_and_manufacturer_for_source(
+    source: dict,
+    title: str,
+) -> tuple[str, str | None]:
+    source_name = source.get("name")
+
+    if not title:
+        return title, None
+
+    # PinballPrimer:
+    # "24 (Stern Pinball, DMD, 2009)"
+    # "Addams Family, The (Bally Williams, DMD, 1992)"
+    if source_name == "PinballPrimer_RuleSheets":
+        match = re.match(r"^(?P<title>.+?)\s+\((?P<meta>[^)]+)\)$", title)
+        if match:
+            cleaned_title = match.group("title").strip()
+            meta = match.group("meta").strip()
+
+            parts = [part.strip() for part in meta.split(",")]
+            if len(parts) >= 2:
+                manufacturer = normalize_manufacturer(parts[0])
+                return cleaned_title, manufacturer
+
+        return title, None
+
+    # Smaller clean cases from sources where the trailing parentheses are
+    # manufacturer tags, not machine type/year metadata.
+    if source_name in {"TiltForums_RuleSheets", "PinballVideos_Tutorials"}:
+        match = re.match(r"^(?P<title>.+?)\s+\((?P<tag>[^)]+)\)$", title)
+        if match:
+            tag = normalize_manufacturer(match.group("tag"))
+            if tag in MANUFACTURER_ALIASES.values():
+                cleaned_title = match.group("title").strip()
+                return cleaned_title, tag
+
+    return title, None
+
+
 def build_record(
     source: dict,
     today: str,
     url: str,
     title: str,
     author: str | None = None,
+    manufacturer: str | None = None,
     machine_id: str | None = None,
     group_id: str | None = None,
     alias_id: str | None = None,
@@ -168,6 +246,7 @@ def build_record(
         "source_name": source["name"],
         "title": title,
         "author": author,
+        "manufacturer": manufacturer,
         "machine_id": machine_id,
         "group_id": group_id,
         "alias_id": alias_id,
@@ -330,6 +409,7 @@ def scrape_json_in_script_source(
         if not name or not raw_id:
             continue
 
+        name, manufacturer = extract_title_and_manufacturer_for_source(source, name)
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
 
         url_path = config["url_template"].replace("{id}", raw_id)
@@ -341,6 +421,7 @@ def scrape_json_in_script_source(
             url=full_url,
             title=name,
             author=None,
+            manufacturer=manufacturer,
             machine_id=machine_id,
             group_id=group_id,
             alias_id=alias_id,
@@ -395,7 +476,9 @@ def scrape_json_api_source(
 
         source_machine_id = str(video.get("machine_id", ""))
         machine = machines.get(source_machine_id, {})
-        title = machine.get("name") or f"Tutorial Video {youtube_id}"
+
+        raw_title = machine.get("name") or f"Tutorial Video {youtube_id}"
+        title, manufacturer = extract_title_and_manufacturer_for_source(source, raw_title)
 
         raw_id = machine.get("opdb_id")
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
@@ -417,6 +500,7 @@ def scrape_json_api_source(
             url=full_url,
             title=title,
             author=author,
+            manufacturer=manufacturer,
             machine_id=machine_id,
             group_id=group_id,
             alias_id=alias_id,
@@ -534,12 +618,15 @@ def scrape_html_source(
 
             print(f"  [{index}/{total}] {title or href}")
 
+        title, manufacturer = extract_title_and_manufacturer_for_source(source, title)
+
         results.append(build_record(
             source=source,
             today=today,
             url=full_url,
             title=title,
             author=author,
+            manufacturer=manufacturer,
             machine_id=machine_id,
             group_id=group_id,
             alias_id=alias_id,
