@@ -21,12 +21,18 @@ MANUFACTURER_ALIASES = {
     "Data East": "Data East",
     "Stern": "Stern",
     "Stern Pinball": "Stern Pinball",
+    "Stern Pinball Inc.": "Stern Pinball Inc.",
+    "Stern Electronics": "Stern Electronics",
     "JJP": "Jersey Jack Pinball",
+    "Jersey Jack": "Jersey Jack Pinball",
     "Jersey Jack Pinball": "Jersey Jack Pinball",
     "Williams": "Williams",
     "Bally": "Bally",
+    "Williams/Bally": "Williams/Bally",
     "Bally Williams": "Bally Williams",
     "Gottlieb": "Gottlieb",
+    "Premier": "Premier",
+    "Premier Gottlieb": "Premier Gottlieb",
     "Zaccaria": "Zaccaria",
     "Game Plan": "Game Plan",
     "Capcom": "Capcom",
@@ -35,12 +41,13 @@ MANUFACTURER_ALIASES = {
     "Chicago Gaming Company": "Chicago Gaming Company",
     "CGC": "Chicago Gaming Company",
     "Atari": "Atari",
-    "Premier": "Premier",
     "Sega": "Sega",
-    "Jersey Jack": "Jersey Jack Pinball",
-    "Premier Gottlieb": "Premier Gottlieb",
-    "Stern Electronics": "Stern Electronics",
+    "Data East/Sega": "Data East/Sega",
     "Recel": "Recel",
+    "Multimorphic": "Multimorphic",
+    "Heighway Pinball/Pinball Brothers": "Heighway Pinball/Pinball Brothers",
+    "Pinball Brothers": "Pinball Brothers",
+    "Barrels of Fun": "Barrels of Fun",
 }
 
 
@@ -170,6 +177,7 @@ def normalize_manufacturer(raw: str | None) -> str | None:
     if not cleaned:
         return None
 
+    cleaned = cleaned.rstrip(":").strip()
     return MANUFACTURER_ALIASES.get(cleaned, cleaned)
 
 
@@ -191,7 +199,7 @@ def extract_opdb_id_from_url_for_source(source: dict, href: str, full_url: str) 
     return None
 
 
-def extract_title_and_manufacturer_for_source(
+def extract_title_and_manufacturer_from_title_for_source(
     source: dict,
     title: str,
 ) -> tuple[str, str | None]:
@@ -200,9 +208,6 @@ def extract_title_and_manufacturer_for_source(
     if not title:
         return title, None
 
-    # PinballPrimer:
-    # "24 (Stern Pinball, DMD, 2009)"
-    # "Addams Family, The (Bally Williams, DMD, 1992)"
     if source_name == "PinballPrimer_RuleSheets":
         match = re.match(r"^(?P<title>.+?)\s+\((?P<meta>[^)]+)\)$", title)
         if match:
@@ -216,17 +221,68 @@ def extract_title_and_manufacturer_for_source(
 
         return title, None
 
-    # Smaller clean cases from sources where the trailing parentheses are
-    # manufacturer tags, not machine type/year metadata.
-    if source_name in {"TiltForums_RuleSheets", "PinballVideos_Tutorials"}:
-        match = re.match(r"^(?P<title>.+?)\s+\((?P<tag>[^)]+)\)$", title)
-        if match:
-            tag = normalize_manufacturer(match.group("tag"))
-            if tag in MANUFACTURER_ALIASES.values():
-                cleaned_title = match.group("title").strip()
-                return cleaned_title, tag
-
     return title, None
+
+
+def extract_tiltforums_manufacturer(a_tag) -> str | None:
+    """
+    Tilt Forums JSON gives us cooked HTML. Links live under manufacturer <h2> sections
+    like "Stern Pinball:" and "Jersey Jack Pinball:".
+    """
+    if a_tag is None:
+        return None
+
+    header = a_tag.find_previous("h2")
+    if header is None:
+        return None
+
+    header_text = header.get_text(" ", strip=True)
+    if not header_text:
+        return None
+
+    header_text = header_text.rstrip(":").strip()
+    manufacturer = normalize_manufacturer(header_text)
+
+    if manufacturer in MANUFACTURER_ALIASES.values():
+        return manufacturer
+
+    return None
+
+
+def extract_direct_manufacturer_for_source(
+    source: dict,
+    title: str,
+    a_tag=None,
+    full_url: str | None = None,
+) -> str | None:
+    source_name = source.get("name")
+
+    if source_name == "Zaccaria_RuleSheets":
+        return "Zaccaria"
+
+    if source_name == "TiltForums_RuleSheets":
+        return extract_tiltforums_manufacturer(a_tag)
+
+    return None
+
+
+def resolve_title_and_manufacturer_for_source(
+    source: dict,
+    title: str,
+    a_tag=None,
+    full_url: str | None = None,
+) -> tuple[str, str | None]:
+    manufacturer = extract_direct_manufacturer_for_source(
+        source=source,
+        title=title,
+        a_tag=a_tag,
+        full_url=full_url,
+    )
+
+    if manufacturer is not None:
+        return title, manufacturer
+
+    return extract_title_and_manufacturer_from_title_for_source(source, title)
 
 
 def build_record(
@@ -290,9 +346,11 @@ def fetch_title_from_page(
     title_filter_text: str | None = None,
     title_strip_suffix: str | None = None,
     title_attribute: str | None = None,
-    author_attribute: str | None = None
-) -> tuple[str | None, str | None, str | None]:
-    """Fetch an article page and extract title and optionally author using CSS selectors."""
+    author_attribute: str | None = None,
+    manufacturer_selector: str | None = None,
+    manufacturer_attribute: str | None = None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Fetch an article page and extract title, author, and optionally manufacturer using CSS selectors."""
     try:
         if use_cache:
             slug = slugify_url(url)
@@ -339,11 +397,22 @@ def fetch_title_from_page(
                 else:
                     author = author_el.get_text(strip=True) or None
 
-        return title, author, None
+        manufacturer = None
+        if manufacturer_selector:
+            manufacturer_el = soup.select_one(manufacturer_selector)
+            if manufacturer_el:
+                if manufacturer_attribute:
+                    manufacturer = manufacturer_el.get(manufacturer_attribute, "").strip() or None
+                else:
+                    manufacturer = manufacturer_el.get_text(strip=True) or None
+
+                manufacturer = normalize_manufacturer(manufacturer)
+
+        return title, author, manufacturer, None
 
     except Exception as e:
         warning = f"Failed to fetch title from {url}: {e}"
-        return None, None, warning
+        return None, None, None, warning
 
 
 def parse_json_content(response, source: dict) -> tuple[str | dict | list | None, str | None]:
@@ -409,7 +478,7 @@ def scrape_json_in_script_source(
         if not name or not raw_id:
             continue
 
-        name, manufacturer = extract_title_and_manufacturer_for_source(source, name)
+        name, manufacturer = resolve_title_and_manufacturer_for_source(source, name)
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
 
         url_path = config["url_template"].replace("{id}", raw_id)
@@ -478,7 +547,7 @@ def scrape_json_api_source(
         machine = machines.get(source_machine_id, {})
 
         raw_title = machine.get("name") or f"Tutorial Video {youtube_id}"
-        title, manufacturer = extract_title_and_manufacturer_for_source(source, raw_title)
+        title, manufacturer = resolve_title_and_manufacturer_for_source(source, raw_title)
 
         raw_id = machine.get("opdb_id")
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
@@ -586,6 +655,7 @@ def scrape_html_source(
             full_url = urljoin(source["url"], href)
 
         author = extract_author(a_tag, author_pattern)
+        fetched_manufacturer = None
 
         raw_id = extract_opdb_id_from_url_for_source(source, href, full_url)
         group_id, machine_id, alias_id = classify_opdb_like_id(raw_id)
@@ -593,7 +663,7 @@ def scrape_html_source(
         if fetch_title:
             time.sleep(fetch_title.get("delay", 1))
 
-            fetched_title, fetched_author, warning = fetch_title_from_page(
+            fetched_title, fetched_author, fetched_manufacturer, warning = fetch_title_from_page(
                 url=full_url,
                 title_selector=fetch_title["title_selector"],
                 author_selector=fetch_title.get("author_selector"),
@@ -603,6 +673,8 @@ def scrape_html_source(
                 title_strip_suffix=fetch_title.get("title_strip_suffix"),
                 title_attribute=fetch_title.get("title_attribute"),
                 author_attribute=fetch_title.get("author_attribute"),
+                manufacturer_selector=fetch_title.get("manufacturer_selector"),
+                manufacturer_attribute=fetch_title.get("manufacturer_attribute"),
             )
 
             if warning:
@@ -618,7 +690,14 @@ def scrape_html_source(
 
             print(f"  [{index}/{total}] {title or href}")
 
-        title, manufacturer = extract_title_and_manufacturer_for_source(source, title)
+        title, fallback_manufacturer = resolve_title_and_manufacturer_for_source(
+            source=source,
+            title=title,
+            a_tag=a_tag,
+            full_url=full_url,
+        )
+
+        manufacturer = fetched_manufacturer if fetched_manufacturer is not None else fallback_manufacturer
 
         results.append(build_record(
             source=source,
